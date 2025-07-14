@@ -32,9 +32,7 @@ class SignData:
 
 
 def export_sentence_for_avatar(sentence_data: SignData, output_file="animation_data.json"):
-    """
-    Экспортировать данные предложения в формате JSON для анимации 3D аватара
-    """
+
     animation_data = {
         "text": sentence_data.text,
         "fps": sentence_data.fps,
@@ -124,11 +122,10 @@ def export_single_sign_for_avatar(sign_data, output_file=None):
     return output_file
 
 
-# ==================== Модели данных ====================
 
 @dataclass
 class SentenceData:
-    """Представляет предложение с объединёнными ключевыми точками"""
+
     text: str
     signs: List[SignData]
     merged_keypoints: np.ndarray  # Объединённые ключевые точки для всех знаков
@@ -144,7 +141,7 @@ class SentenceData:
         return None
 
 
-# ==================== Слой работы с базой данных ====================
+
 class SignDB:
     def __init__(self, db_path: str = 'signs.db', data_dir: str = 'sign_data'):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -153,7 +150,7 @@ class SignDB:
         self.data_dir.mkdir(exist_ok=True)
 
     def _init_tables(self):
-        """Инициализация таблиц базы данных"""
+
         queries = [
             '''CREATE TABLE IF NOT EXISTS signs (
                 word TEXT PRIMARY KEY,
@@ -219,7 +216,7 @@ class SignDB:
             return None
 
     def save_sentence(self, sentence: SentenceData, filepath: str):
-        """Сохранить данные предложения в базу данных"""
+
         c = self.conn.cursor()
         words_str = ','.join([sign.word for sign in sentence.signs])
         c.execute('INSERT INTO sentences (text, words, file) VALUES (?, ?, ?)',
@@ -227,12 +224,12 @@ class SignDB:
         self.conn.commit()
 
     def list_all(self) -> List[str]:
-        """Список всех доступных знаков"""
+
         c = self.conn.cursor()
         return [r[0] for r in c.execute('SELECT word FROM signs ORDER BY word')]
 
     def list_sentences(self) -> List[Tuple[int, str]]:
-        """Список сохранённых предложений"""
+
         c = self.conn.cursor()
         return [(r[0], r[1]) for r in c.execute('SELECT id, text FROM sentences ORDER BY created_at DESC')]
 
@@ -247,7 +244,7 @@ class SentenceBuilder:
         self.transition_frames = transition_frames
 
     def create_neutral_pose(self, reference_frame: np.ndarray) -> np.ndarray:
-        """Создать нейтральную позу для переходов и пауз"""
+
         neutral = reference_frame.copy()
         # Левая рука (индексы 33-53)
         neutral[33:54, :3] = 0
@@ -259,7 +256,7 @@ class SentenceBuilder:
 
     def interpolate_keypoints(self, start_frame: np.ndarray, end_frame: np.ndarray,
                               num_frames: int) -> np.ndarray:
-        """Плавная интерполяция между двумя кадрами"""
+
         if num_frames <= 0:
             return np.array([])
         interpolated = np.zeros((num_frames, 75, 4))
@@ -270,7 +267,7 @@ class SentenceBuilder:
         return interpolated
 
     def merge_signs(self, signs: List[SignData], target_fps: float = 30.0) -> SentenceData:
-        """Объединить несколько знаков в одно предложение с плавными переходами"""
+
         if not signs:
             raise ValueError("Нет доступных знаков для объединения")
         normalized_signs = []
@@ -327,7 +324,6 @@ class SentenceBuilder:
         )
 
 
-# ==================== Основной процессор ====================
 class Processor:
     def __init__(self):
         self.holistic = mp.solutions.holistic.Holistic(
@@ -343,7 +339,7 @@ class Processor:
         self.sentence_builder = SentenceBuilder()
 
     def extract_keypoints(self, video_path: str) -> Tuple[np.ndarray, float]:
-        """Извлечь ключевые точки из видеозаписи"""
+
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Невозможно открыть видео: {video_path}")
@@ -368,7 +364,7 @@ class Processor:
         return arr, fps
 
     def _extract_frame_keypoints(self, res) -> np.ndarray:
-        """Извлечь ключевые точки из одного кадра"""
+
         pts = []
         # Поза (33 точки)
         if res.pose_landmarks:
@@ -391,7 +387,7 @@ class Processor:
         return np.array(pts, dtype=np.float32)
 
     def add_sign(self, word: str, video: str, synonyms: Optional[List[str]] = None):
-        """Добавить новый знак в базу данных"""
+
         syns = synonyms or []
         base = self.morph.parse(word)[0].normal_form
         kp, fps = self.extract_keypoints(video)
@@ -401,7 +397,7 @@ class Processor:
         print(f"Знак '{word}' (базовая форма: '{base}') добавлен с {len(kp)} кадрами.")
 
     def translate_sentence(self, text: str, save_merged: bool = False) -> SentenceData:
-        """Перевести предложение в знаковый язык с плавными переходами"""
+
         tokens = re.findall(r"\w+", text.lower())
         signs = []
         missing_words = []
@@ -433,7 +429,7 @@ class Processor:
         return sentence
 
     def translate(self, text: str) -> List[SignData]:
-        """Устаревший метод для перевода отдельных слов"""
+
         tokens = re.findall(r"\w+", text.lower())
         result = []
         for t in tokens:
@@ -448,14 +444,14 @@ class Processor:
 
     # Методы экспорта для 3D аватара
     def export_sentence_animation(self, text: str, output_file: str = None):
-        """Экспорт анимации предложения для 3D аватара"""
+
         sentence = self.translate_sentence(text)
         if output_file is None:
             output_file = f"sentence_{text.replace(' ', '_')}.json"
         return export_sentence_for_avatar(sentence, output_file)
 
     def export_word_animation(self, word: str, output_file: str = None):
-        """Экспорт анимации отдельного знака для 3D аватара"""
+
         sign = self.db.get(word)
         if not sign:
             raise ValueError(f"Знак для '{word}' не найден")
@@ -508,7 +504,7 @@ class Visualizer:
         ax.set_facecolor('white')
 
     def _draw_connections(self, ax, pts, conns, offset, count, color, alpha=0.7):
-        """Отрисовка соединений между точками"""
+
         for i, j in conns:
             if (offset <= i < offset + count and offset <= j < offset + count and
                     pts[i, 3] > 0.5 and pts[j, 3] > 0.5):
@@ -518,7 +514,7 @@ class Visualizer:
                           color=color, alpha=alpha, linewidth=2)
 
     def _draw_points(self, ax, pts, offset, count, color, size=30):
-        """Отрисовка отдельных точек"""
+
         visible_mask = pts[offset:offset + count, 3] > 0.5
         if not visible_mask.any():
             return
@@ -527,7 +523,7 @@ class Visualizer:
                    c=color, s=size, alpha=0.8, edgecolors='black', linewidth=0.5)
 
     def animate_sentence(self, sentence: SentenceData, save: Optional[str] = None):
-        """Анимация перевода предложения с индикаторами слов"""
+
         plt.style.use('default')
         fig = plt.figure(figsize=(16, 10))
         fig.patch.set_facecolor('white')
@@ -626,7 +622,7 @@ class Visualizer:
         return self.animate_sentence(sentence, save)
 
     def plot_static_frame(self, kp: np.ndarray, idx: int = 0, title: str = "Кадр"):
-        """Отобразить статичный кадр"""
+
         plt.style.use('default')
         fig = plt.figure(figsize=(12, 9))
         fig.patch.set_facecolor('white')
