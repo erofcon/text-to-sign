@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Sign Language Avatar</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            min-width: 300px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            z-index: 100;
+        }
+
+        #word-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px 40px;
+            border-radius: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            z-index: 99;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div id="container">
+    <div id="controls">
+        <h3 style="margin-top: 0; color: #333;">Sign Language Avatar</h3>
+
+        <div class="control-group">
+            <label>Animation Speed:</label>
+            <input type="range" id="speedSlider" min="0.1" max="3" value="1" step="0.1">
+            <span id="speedValue">1.0x</span>
+        </div>
+
+        <div class="control-group">
+            <button onclick="loadDemoData()">Load Demo Data</button>
+            <button onclick="toggleAnimation()">Play/Pause</button>
+            <button onclick="resetAnimation()">Reset</button>
+        </div>
+
+        <div class="control-group">
+            <label>Load Your Data:</label>
+            <input type="file" id="dataFile" accept=".json" onchange="loadUserData(event)">
+        </div>
+
+        <div class="control-group">
+            <label>Avatar Style:</label>
+            <button onclick="changeAvatarStyle('stick')">Stick Figure</button>
+            <button onclick="changeAvatarStyle('robot')">Robot</button>
+            <button onclick="changeAvatarStyle('human')">Human-like</button>
+        </div>
+    </div>
+
+    <div id="word-display"></div>
+
+    <div id="status">
+        Ready to animate sign language
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    // Global variables
+    let scene, camera, renderer, avatar, animationData, currentFrame = 0;
+    let isPlaying = false, animationSpeed = 1.0;
+    let animationId, avatarStyle = 'stick';
+
+    // Initialize Three.js scene
+    function init() {
+        // Scene setup
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+
+        // Camera setup
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1, 3);
+        camera.lookAt(0, 1, 0);
+
+        // Renderer setup
+        renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        const groundMaterial = new THREE.MeshLambertMaterial({color: 0x90EE90});
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Create avatar
+        createAvatar();
+
+        // Event listeners
+        window.addEventListener('resize', onWindowResize);
+        document.getElementById('speedSlider').addEventListener('input', updateSpeed);
+
+        // Start render loop
+        animate();
+    }
+
+    function validateAnimationData(data) {
+        const required = ['text', 'fps', 'frames', 'word_boundaries', 'total_frames'];
+        const missing = required.filter(key => !(key in data));
+
+        if (missing.length > 0) {
+            throw new Error(`Отсутствуют обязательные поля: ${missing.join(', ')}`);
+        }
+
+        if (!Array.isArray(data.frames) || data.frames.length === 0) {
+            throw new Error('Нет данных анимации');
+        }
+
+        if (!Array.isArray(data.word_boundaries) || data.word_boundaries.length === 0) {
+            throw new Error('Отсутствуют границы слов');
+        }
+
+        return true;
+    }
+
+    function createAvatar() {
+        if (avatar) {
+            scene.remove(avatar);
+        }
+
+        avatar = new THREE.Group();
+
+        if (avatarStyle === 'stick') {
+            createStickFigure();
+        } else if (avatarStyle === 'robot') {
+            createRobotAvatar();
+        } else {
+            createHumanAvatar();
+        }
+
+        scene.add(avatar);
+    }
+
+    function createStickFigure() {
+        const material = new THREE.MeshBasicMaterial({color: 0x333333});
+
+        // Body parts as simple cylinders
+        const bodyGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.8);
+        const body = new THREE.Mesh(bodyGeometry, material);
+        body.position.set(0, 1.2, 0);
+        avatar.add(body);
+
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.15);
+        const head = new THREE.Mesh(headGeometry, material);
+        head.position.set(0, 1.8, 0);
+        avatar.add(head);
+
+        // Arms
+        const armGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.6);
+        const leftArm = new THREE.Mesh(armGeometry, material);
+        leftArm.position.set(-0.4, 1.4, 0);
+        leftArm.rotation.z = Math.PI / 4;
+        avatar.add(leftArm);
+
+        const rightArm = new THREE.Mesh(armGeometry, material);
+        rightArm.position.set(0.4, 1.4, 0);
+        rightArm.rotation.z = -Math.PI / 4;
+        avatar.add(rightArm);
+
+        // Store references for animation
+        avatar.userData = {
+            head: head,
+            body: body,
+            leftArm: leftArm,
+            rightArm: rightArm
+        };
+    }
+
+    function createRobotAvatar() {
+        const material = new THREE.MeshPhongMaterial({color: 0x4169E1});
+
+        // Body
+        const bodyGeometry = new THREE.BoxGeometry(0.6, 0.8, 0.3);
+        const body = new THREE.Mesh(bodyGeometry, material);
+        body.position.set(0, 1.2, 0);
+        avatar.add(body);
+
+        // Head
+        const headGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+        const head = new THREE.Mesh(headGeometry, material);
+        head.position.set(0, 1.8, 0);
+        avatar.add(head);
+
+        // Eyes
+        const eyeGeometry = new THREE.SphereGeometry(0.05);
+        const eyeMaterial = new THREE.MeshBasicMaterial({color: 0xff0000});
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(-0.1, 1.85, 0.2);
+        head.add(leftEye);
+
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(0.1, 1.85, 0.2);
+        head.add(rightEye);
+
+        // Arms
+        const armGeometry = new THREE.BoxGeometry(0.15, 0.6, 0.15);
+        const leftArm = new THREE.Mesh(armGeometry, material);
+        leftArm.position.set(-0.4, 1.4, 0);
+        avatar.add(leftArm);
+
+        const rightArm = new THREE.Mesh(armGeometry, material);
+        rightArm.position.set(0.4, 1.4, 0);
+        avatar.add(rightArm);
+
+        avatar.userData = {
+            head: head,
+            body: body,
+            leftArm: leftArm,
+            rightArm: rightArm
+        };
+    }
+
+    function createHumanAvatar() {
+        const skinMaterial = new THREE.MeshPhongMaterial({color: 0xfdbcb4});
+        const clothMaterial = new THREE.MeshPhongMaterial({color: 0x4169E1});
+
+        // Body
+        const bodyGeometry = new THREE.CylinderGeometry(0.25, 0.3, 0.8);
+        const body = new THREE.Mesh(bodyGeometry, clothMaterial);
+        body.position.set(0, 1.2, 0);
+        avatar.add(body);
+
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.2);
+        const head = new THREE.Mesh(headGeometry, skinMaterial);
+        head.position.set(0, 1.8, 0);
+        avatar.add(head);
+
+        // Hair
+        const hairGeometry = new THREE.SphereGeometry(0.22);
+        const hairMaterial = new THREE.MeshPhongMaterial({color: 0x8B4513});
+        const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+        hair.position.set(0, 1.85, 0);
+        head.add(hair);
+
+        // Arms
+        const armGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.6);
+        const leftArm = new THREE.Mesh(armGeometry, skinMaterial);
+        leftArm.position.set(-0.4, 1.4, 0);
+        avatar.add(leftArm);
+
+        const rightArm = new THREE.Mesh(armGeometry, skinMaterial);
+        rightArm.position.set(0.4, 1.4, 0);
+        avatar.add(rightArm);
+
+        // Hands
+        const handGeometry = new THREE.SphereGeometry(0.1);
+        const leftHand = new THREE.Mesh(handGeometry, skinMaterial);
+        leftHand.position.set(0, -0.35, 0);
+        leftArm.add(leftHand);
+
+        const rightHand = new THREE.Mesh(handGeometry, skinMaterial);
+        rightHand.position.set(0, -0.35, 0);
+        rightArm.add(rightHand);
+
+        avatar.userData = {
+            head: head,
+            body: body,
+            leftArm: leftArm,
+            rightArm: rightArm,
+            leftHand: leftHand,
+            rightHand: rightHand
+        };
+    }
+
+    function loadDemoData() {
+        // Demo data simulating sign language keypoints
+        animationData = {
+            sentence: "Hello World",
+            fps: 30,
+            frames: [],
+            word_boundaries: [[0, 30], [31, 60]]
+        };
+
+        // Generate demo frames
+        for (let i = 0; i < 60; i++) {
+            const frame = {
+                // Simplified: just simulate arm movements
+                leftArm: {
+                    rotation: {
+                        x: Math.sin(i * 0.1) * 0.5,
+                        y: Math.cos(i * 0.1) * 0.3,
+                        z: 0
+                    }
+                },
+                rightArm: {
+                    rotation: {
+                        x: Math.sin(i * 0.1 + Math.PI) * 0.5,
+                        y: Math.cos(i * 0.1 + Math.PI) * 0.3,
+                        z: 0
+                    }
+                },
+                head: {
+                    rotation: {
+                        x: Math.sin(i * 0.05) * 0.1,
+                        y: Math.cos(i * 0.08) * 0.1,
+                        z: 0
+                    }
+                }
+            };
+            animationData.frames.push(frame);
+        }
+
+        updateStatus("Demo data loaded - 60 frames, 2 words");
+    }
+
+    function loadUserData(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                processUserData(data);
+            } catch (error) {
+                updateStatus("Error loading file: " + error.message);
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function processUserData(data) {
+        try {
+            // Используем формат из нашего export.py
+            animationData = {
+                sentence: data.text || "Custom Animation",
+                fps: data.fps || 30,
+                frames: data.frames || [],
+                word_boundaries: data.word_boundaries || [],
+                total_frames: data.total_frames || 0
+            };
+
+            updateStatus(`Загружено ${animationData.frames.length} кадров ` +
+                `для предложения "${animationData.sentence}"`);
+
+            // Сбрасываем анимацию
+            resetAnimation();
+
+            // Автоматически запускаем анимацию после загрузки
+            if (animationData.frames.length > 0) {
+                isPlaying = true;
+                playAnimation();
+            }
+        } catch (error) {
+            updateStatus("Ошибка обработки данных: " + error.message);
+        }
+    }
+
+    function convertKeypointsToFrame(keypoints) {
+        // Convert MediaPipe keypoints to avatar animation
+        // This is a simplified conversion - adjust based on your keypoint structure
+
+        const frame = {
+            leftArm: {rotation: {x: 0, y: 0, z: 0}},
+            rightArm: {rotation: {x: 0, y: 0, z: 0}},
+            head: {rotation: {x: 0, y: 0, z: 0}}
+        };
+
+        if (keypoints.length >= 75) {
+            // Use shoulder and wrist positions to calculate arm rotations
+            const leftShoulder = keypoints[11];  // MediaPipe pose landmark
+            const rightShoulder = keypoints[12];
+            const leftWrist = keypoints[15];
+            const rightWrist = keypoints[16];
+
+            // Calculate arm rotations (simplified)
+            if (leftShoulder && leftWrist) {
+                const dx = leftWrist[0] - leftShoulder[0];
+                const dy = leftWrist[1] - leftShoulder[1];
+                frame.leftArm.rotation.z = Math.atan2(dy, dx);
+            }
+
+            if (rightShoulder && rightWrist) {
+                const dx = rightWrist[0] - rightShoulder[0];
+                const dy = rightWrist[1] - rightShoulder[1];
+                frame.rightArm.rotation.z = Math.atan2(dy, dx);
+            }
+        }
+
+        return frame;
+    }
+
+    function toggleAnimation() {
+        isPlaying = !isPlaying;
+        if (isPlaying && animationData) {
+            playAnimation();
+        }
+    }
+
+    function playAnimation() {
+        if (!isPlaying || !animationData || !animationData.frames) return;
+
+        // Проверяем достижение конца анимации
+        if (currentFrame >= animationData.frames.length) {
+            currentFrame = 0;
+        }
+
+        const frame = animationData.frames[currentFrame];
+        applyFrameToAvatar(frame);
+        updateWordDisplay();
+
+        // Обновляем статус воспроизведения
+        const progress = ((currentFrame / animationData.frames.length) * 100).toFixed(1);
+        updateStatus(`Воспроизведение: ${progress}% (Кадр ${currentFrame + 1}/${animationData.frames.length})`);
+
+        currentFrame++;
+
+        // Рассчитываем задержку кадра с учетом скорости воспроизведения
+        const frameDelay = (1000 / animationData.fps) / animationSpeed;
+        setTimeout(() => {
+            if (isPlaying) {
+                requestAnimationFrame(playAnimation);
+            }
+        }, frameDelay);
+    }
+
+    function applyFrameToAvatar(frame) {
+        if (!avatar.userData || !frame) return;
+
+        const {head, leftArm, rightArm, leftHand, rightHand} = avatar.userData;
+
+        // Применяем повороты головы
+        if (frame.head && head) {
+            head.rotation.x = frame.head.rotation.x;
+            head.rotation.y = frame.head.rotation.y;
+            head.rotation.z = frame.head.rotation.z;
+        }
+
+        // Применяем повороты левой руки
+        if (frame.leftArm && leftArm) {
+            leftArm.rotation.x = frame.leftArm.rotation.x;
+            leftArm.rotation.y = frame.leftArm.rotation.y;
+            leftArm.rotation.z = frame.leftArm.rotation.z;
+        }
+
+        // Применяем повороты правой руки
+        if (frame.rightArm && rightArm) {
+            rightArm.rotation.x = frame.rightArm.rotation.x;
+            rightArm.rotation.y = frame.rightArm.rotation.y;
+            rightArm.rotation.z = frame.rightArm.rotation.z;
+        }
+
+        // Применяем позиции рук (если доступны)
+        if (frame.leftHand && leftHand) {
+            leftHand.position.x = frame.leftHand.position.x;
+            leftHand.position.y = frame.leftHand.position.y;
+            leftHand.position.z = frame.leftHand.position.z;
+        }
+
+        if (frame.rightHand && rightHand) {
+            rightHand.position.x = frame.rightHand.position.x;
+            rightHand.position.y = frame.rightHand.position.y;
+            rightHand.position.z = frame.rightHand.position.z;
+        }
+    }
+
+    function updateWordDisplay() {
+        if (!animationData || !animationData.word_boundaries) return;
+
+        const wordDisplay = document.getElementById('word-display');
+        let currentWord = '';
+
+        for (let i = 0; i < animationData.word_boundaries.length; i++) {
+            const [start, end] = animationData.word_boundaries[i];
+            if (currentFrame >= start && currentFrame <= end) {
+                // Получаем текущее слово из предложения
+                const words = animationData.sentence.split(' ');
+                currentWord = words[i] || '';
+                break;
+            }
+        }
+
+        if (currentWord) {
+            wordDisplay.textContent = currentWord;
+            wordDisplay.style.display = 'block';
+        } else {
+            wordDisplay.style.display = 'none';
+        }
+    }
+
+    function resetAnimation() {
+        currentFrame = 0;
+        isPlaying = false;
+        document.getElementById('word-display').style.display = 'none';
+    }
+
+    function changeAvatarStyle(style) {
+        avatarStyle = style;
+        createAvatar();
+        updateStatus(`Avatar style changed to: ${style}`);
+    }
+
+    function updateSpeed() {
+        const slider = document.getElementById('speedSlider');
+        animationSpeed = parseFloat(slider.value);
+        document.getElementById('speedValue').textContent = animationSpeed.toFixed(1) + 'x';
+    }
+
+    function updateStatus(message) {
+        document.getElementById('status').textContent = message;
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Rotate camera around the avatar
+        const time = Date.now() * 0.0005;
+        camera.position.x = Math.cos(time) * 3;
+        camera.position.z = Math.sin(time) * 3;
+        camera.lookAt(0, 1, 0);
+
+        renderer.render(scene, camera);
+    }
+
+    // Initialize on page load
+    window.addEventListener('load', init);
+</script>
+</body>
+</html>
